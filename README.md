@@ -15,7 +15,7 @@ When you `git push`, `git fetch`, or `ssh` into a server, macOS shows a Touch ID
    - Returns the passphrase to SSH
 5. If Touch ID fails or is cancelled, the passphrase is never returned and SSH is denied
 
-## Dependencies
+## Prerequisites
 
 | Dependency | How to get it |
 |---|---|
@@ -23,133 +23,16 @@ When you `git push`, `git fetch`, or `ssh` into a server, macOS shows a Touch ID
 | **Homebrew** | `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"` |
 | **GitHub CLI** (`gh`) | `brew install gh` |
 
-## Files installed
+## Setup
 
-| File | Purpose |
-|---|---|
-| `~/.ssh/id_ed25519` | SSH private key (passphrase-protected) |
-| `~/.ssh/id_ed25519.pub` | SSH public key |
-| `~/.ssh/touchid-askpass` | Compiled Touch ID binary |
-| `~/.ssh/config` | SSH client configuration |
-| `~/.ssh/known_hosts` | GitHub host keys |
-
-Keychain also stores:
-- Generic password with service `ssh-passphrase`, account `id_ed25519`
-
-## Manual setup
-
-### 1. Install prerequisites
-
-```bash
-# Xcode Command Line Tools (provides swiftc compiler)
-xcode-select --install
-
-# Homebrew
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# GitHub CLI
-brew install gh
-```
-
-### 2. Generate SSH key
-
-```bash
-mkdir -p ~/.ssh && chmod 700 ~/.ssh
-ssh-keygen -t ed25519 -C "your-email@example.com" -f ~/.ssh/id_ed25519
-```
-
-**Important:** Set a passphrase when prompted. This passphrase gets stored in Keychain — you only type it twice more (once for Keychain, once to verify the key).
-
-### 3. Store passphrase in Keychain
-
-```bash
-security add-generic-password -a id_ed25519 -s ssh-passphrase -U -w
-```
-
-Type your SSH passphrase when prompted. This stores it in Keychain for the askpass binary to retrieve after Touch ID.
-
-### 4. Compile Touch ID askpass
-
-```bash
-swiftc touchid-askpass.swift -o ~/.ssh/touchid-askpass -framework LocalAuthentication -framework Security
-chmod +x ~/.ssh/touchid-askpass
-```
-
-### 5. Configure SSH
-
-Create `~/.ssh/config`:
+Clone this repo and point Claude at it:
 
 ```
-Host *
-  AddKeysToAgent no
-  IdentityFile ~/.ssh/id_ed25519
-
-Host github.com
-  HostName github.com
-  User git
-  IdentityFile ~/.ssh/id_ed25519
+claude
+> follow CLAUDE.md to set up Touch ID SSH on this machine
 ```
 
-```bash
-chmod 600 ~/.ssh/config
-```
-
-### 6. Add GitHub host keys
-
-```bash
-ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
-chmod 600 ~/.ssh/known_hosts
-```
-
-### 7. Set environment variables
-
-Add to `~/.zshrc` (or `~/.bashrc`):
-
-```bash
-# SSH Touch ID askpass
-export SSH_ASKPASS="$HOME/.ssh/touchid-askpass"
-export SSH_ASKPASS_REQUIRE=force
-```
-
-Then reload:
-
-```bash
-source ~/.zshrc
-```
-
-### 8. Clear the SSH agent
-
-```bash
-ssh-add -D
-```
-
-### 9. Set up GitHub
-
-```bash
-# Authenticate gh CLI
-gh auth login
-
-# Add SSH key permission scope
-gh auth refresh -h github.com -s admin:public_key
-
-# Upload public key to GitHub
-gh ssh-key add ~/.ssh/id_ed25519.pub --title "MacBook Touch ID"
-
-# Set gh to use SSH
-gh config set git_protocol ssh --host github.com
-```
-
-### 10. Test
-
-```bash
-ssh -T git@github.com
-```
-
-A Touch ID prompt should appear. After authenticating, you should see:
-
-```
-Hi <username>! You've successfully authenticated, but GitHub does not provide shell access.
-```
+Claude will walk you through each step, generate a key with a name it picks, compile the binary, configure SSH, and wire up GitHub — prompting you only when your input is needed (passphrase, browser auth, etc.).
 
 ## Troubleshooting
 
@@ -168,7 +51,7 @@ Your Mac doesn't have Touch ID hardware, or it's disabled in System Settings.
 ### "Could not retrieve passphrase from Keychain"
 The passphrase wasn't stored in Keychain. Run:
 ```bash
-security add-generic-password -a id_ed25519 -s ssh-passphrase -U -w
+security add-generic-password -a <key-name> -s ssh-passphrase -U -w
 ```
 
 ## License

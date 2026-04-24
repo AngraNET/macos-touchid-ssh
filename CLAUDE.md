@@ -1,31 +1,34 @@
-# macOS Touch ID SSH — Claude Setup Guide
+# macOS Touch ID SSH — Setup Guide
 
-Follow these steps exactly, in order, on a fresh macOS machine. Each step must succeed before moving to the next. Steps marked **(interactive)** require the user to run the command themselves via `! <command>` because they need keyboard/biometric input.
+Follow these steps in order on a fresh macOS machine. Each step must succeed before moving to the next.
 
-## Prerequisites check
+Steps marked **(interactive)** require the user to run the command themselves via `! <command>` because they need keyboard/biometric input.
+
+## Before you start
+
+Pick a key name based on the machine. Use the hostname or a short descriptor (e.g., `macbook-pro-2024`, `daniels-mac`). Use this name consistently for the key filename, Keychain account, and GitHub title throughout the guide.
+
+Example: if the key name is `macbook-pro`, the key file is `~/.ssh/macbook-pro`, the Keychain account is `macbook-pro`, and the GitHub title is `macbook-pro`.
+
+## Step 1: Check prerequisites
 
 ```bash
-# Verify macOS with Touch ID
-sw_vers
-# Verify Xcode CLI tools (includes swiftc)
-xcode-select -p
-swiftc --version
-# If not installed: xcode-select --install (interactive)
+sw_vers                # macOS version
+xcode-select -p        # Xcode CLI tools
+swiftc --version       # Swift compiler
+which brew             # Homebrew
 ```
 
-```bash
-# Verify Homebrew
-which brew
-# If not installed: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" (interactive)
-```
+If Xcode CLI tools are missing: `xcode-select --install` **(interactive)**
+If Homebrew is missing: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"` **(interactive)**
 
-## Step 1: Install GitHub CLI
+## Step 2: Install GitHub CLI
 
 ```bash
 brew install gh
 ```
 
-## Step 2: Authenticate GitHub CLI (interactive)
+## Step 3: Authenticate GitHub CLI (interactive)
 
 User must run:
 ```bash
@@ -33,71 +36,75 @@ User must run:
 ```
 Select: GitHub.com > HTTPS > Login with a web browser. Complete the browser flow.
 
-## Step 3: Create SSH directory
+## Step 4: Create SSH directory
 
 ```bash
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 ```
 
-## Step 4: Generate SSH key (interactive)
+## Step 5: Generate SSH key (interactive)
+
+Tell the user to set a passphrase. Without a passphrase, Touch ID has nothing to protect.
 
 User must run:
 ```bash
-! ssh-keygen -t ed25519 -C "<user-email>" -f ~/.ssh/id_ed25519
+! ssh-keygen -t ed25519 -C "<user-email>" -f ~/.ssh/<key-name>
 ```
-**The user MUST set a passphrase.** Without a passphrase, Touch ID has nothing to protect. Remind them before they run it.
 
-## Step 5: Store passphrase in Keychain (interactive)
+## Step 6: Store passphrase in Keychain (interactive)
 
 User must run:
 ```bash
-! security add-generic-password -a id_ed25519 -s ssh-passphrase -U -w
+! security add-generic-password -a <key-name> -s ssh-passphrase -U -w
 ```
 They type their SSH passphrase when prompted. This stores it in Keychain for the askpass binary to retrieve after Touch ID.
 
-## Step 6: Compile Touch ID askpass binary
+## Step 7: Compile Touch ID askpass binary
 
+The `touchid-askpass.swift` source is in this repo. Update the Keychain account name in the source to match `<key-name>` before compiling:
+
+- In `touchid-askpass.swift`, change `kSecAttrAccount` value from `"id_ed25519"` to `"<key-name>"`
+
+Then compile:
 ```bash
 swiftc <path-to-repo>/touchid-askpass.swift -o ~/.ssh/touchid-askpass -framework LocalAuthentication -framework Security
 chmod +x ~/.ssh/touchid-askpass
 ```
 
-Verify it compiled and links only to Apple system libraries:
+Verify it links only to Apple system libraries:
 ```bash
 otool -L ~/.ssh/touchid-askpass
 ```
 Expected: only `/System/Library/Frameworks/` and `/usr/lib/` entries.
 
-## Step 7: Write SSH config
+## Step 8: Write SSH config
 
 Write `~/.ssh/config`:
 ```
 Host *
   AddKeysToAgent no
-  IdentityFile ~/.ssh/id_ed25519
+  IdentityFile ~/.ssh/<key-name>
 
 Host github.com
   HostName github.com
   User git
-  IdentityFile ~/.ssh/id_ed25519
+  IdentityFile ~/.ssh/<key-name>
 ```
 
 ```bash
 chmod 600 ~/.ssh/config
 ```
 
-Key config explained:
 - `AddKeysToAgent no` — key is never cached in the agent; every operation triggers askpass
-- No `UseKeychain` needed — we manage Keychain access directly in the askpass binary
 
-## Step 8: Add GitHub host keys
+## Step 9: Add GitHub host keys
 
 ```bash
 ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 chmod 600 ~/.ssh/known_hosts
 ```
 
-## Step 9: Set shell environment variables
+## Step 10: Set shell environment variables
 
 Append to `~/.zshrc`:
 ```bash
@@ -115,7 +122,7 @@ Both variables are required:
 - `SSH_ASKPASS` — path to the Touch ID binary
 - `SSH_ASKPASS_REQUIRE=force` — forces SSH to use askpass even when a TTY is available
 
-## Step 10: Clear the SSH agent
+## Step 11: Clear the SSH agent
 
 ```bash
 ssh-add -D
@@ -123,23 +130,20 @@ ssh-add -D
 
 The key must NOT be in the agent. If it is, SSH uses the cached key without calling askpass.
 
-## Step 11: Upload public key to GitHub
+## Step 12: Upload public key to GitHub
 
-```bash
-gh auth refresh -h github.com -s admin:public_key
-```
-Then (interactive — browser flow):
+Grant the SSH key permission scope **(interactive — browser flow)**:
 ```bash
 ! gh auth refresh -h github.com -s admin:public_key
 ```
 
 After the browser flow completes:
 ```bash
-gh ssh-key add ~/.ssh/id_ed25519.pub --title "MacBook Touch ID"
+gh ssh-key add ~/.ssh/<key-name>.pub --title "<key-name>"
 gh config set git_protocol ssh --host github.com
 ```
 
-## Step 12: Test
+## Step 13: Test
 
 ```bash
 ssh -T git@github.com
@@ -150,9 +154,9 @@ Expected: Touch ID prompt appears. After fingerprint, output:
 Hi <username>! You've successfully authenticated, but GitHub does not provide shell access.
 ```
 
-## Step 13: Update existing cloned repos to SSH
+## Step 14: Update existing cloned repos to SSH
 
-For any repos previously cloned via HTTPS:
+For any repos previously cloned via HTTPS, switch remotes:
 ```bash
 git -C <repo-path> remote set-url origin git@github.com:<owner>/<repo>.git
 ```
@@ -174,7 +178,7 @@ git push / ssh
 SSH client needs passphrase (key not in agent)
     |
     v
-SSH_ASKPASS → ~/.ssh/touchid-askpass (compiled Swift binary)
+SSH_ASKPASS → ~/.ssh/touchid-askpass
     |
     v
 LocalAuthentication.framework → Touch ID prompt
@@ -185,8 +189,3 @@ Security.framework → retrieve passphrase from Keychain
     v
 passphrase returned to SSH → connection proceeds
 ```
-
-## Files
-
-- `touchid-askpass.swift` — source for the Touch ID askpass binary
-- No third-party dependencies. Only Apple's LocalAuthentication and Security frameworks.
