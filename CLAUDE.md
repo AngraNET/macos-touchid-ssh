@@ -47,10 +47,18 @@ User must run:
 ```
 **The user MUST set a passphrase.** Without a passphrase, Touch ID has nothing to protect. Remind them before they run it.
 
-## Step 5: Compile Touch ID askpass binary
+## Step 5: Store passphrase in Keychain (interactive)
+
+User must run:
+```bash
+! security add-generic-password -a id_ed25519 -s ssh-passphrase -U -w
+```
+They type their SSH passphrase when prompted. This stores it in Keychain for the askpass binary to retrieve after Touch ID.
+
+## Step 6: Compile Touch ID askpass binary
 
 ```bash
-swiftc <path-to-repo>/touchid-askpass.swift -o ~/.ssh/touchid-askpass -framework LocalAuthentication
+swiftc <path-to-repo>/touchid-askpass.swift -o ~/.ssh/touchid-askpass -framework LocalAuthentication -framework Security
 chmod +x ~/.ssh/touchid-askpass
 ```
 
@@ -60,13 +68,12 @@ otool -L ~/.ssh/touchid-askpass
 ```
 Expected: only `/System/Library/Frameworks/` and `/usr/lib/` entries.
 
-## Step 6: Write SSH config
+## Step 7: Write SSH config
 
 Write `~/.ssh/config`:
 ```
 Host *
-  AddKeysToAgent confirm
-  UseKeychain yes
+  AddKeysToAgent no
   IdentityFile ~/.ssh/id_ed25519
 
 Host github.com
@@ -80,17 +87,17 @@ chmod 600 ~/.ssh/config
 ```
 
 Key config explained:
-- `AddKeysToAgent confirm` — agent requires confirmation (via askpass) on every signing operation
-- `UseKeychain yes` — passphrase stored in Apple Keychain
+- `AddKeysToAgent no` — key is never cached in the agent; every operation triggers askpass
+- No `UseKeychain` needed — we manage Keychain access directly in the askpass binary
 
-## Step 7: Add GitHub host keys
+## Step 8: Add GitHub host keys
 
 ```bash
 ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
 chmod 600 ~/.ssh/known_hosts
 ```
 
-## Step 8: Set shell environment variables
+## Step 9: Set shell environment variables
 
 Append to `~/.zshrc`:
 ```bash
@@ -106,22 +113,22 @@ source ~/.zshrc
 
 Both variables are required:
 - `SSH_ASKPASS` — path to the Touch ID binary
-- `SSH_ASKPASS_REQUIRE=force` — forces the agent to use askpass even when a TTY is available
+- `SSH_ASKPASS_REQUIRE=force` — forces SSH to use askpass even when a TTY is available
 
-## Step 9: Add SSH key to agent with confirmation (interactive)
+## Step 10: Clear the SSH agent
 
-User must run:
 ```bash
-! ssh-add -c --apple-use-keychain ~/.ssh/id_ed25519
+ssh-add -D
 ```
-They type their passphrase once. Keychain stores it. The `-c` flag is critical — it marks the key as requiring confirmation on every use.
 
-## Step 10: Upload public key to GitHub
+The key must NOT be in the agent. If it is, SSH uses the cached key without calling askpass.
+
+## Step 11: Upload public key to GitHub
 
 ```bash
 gh auth refresh -h github.com -s admin:public_key
 ```
-Then (interactive):
+Then (interactive — browser flow):
 ```bash
 ! gh auth refresh -h github.com -s admin:public_key
 ```
@@ -132,7 +139,7 @@ gh ssh-key add ~/.ssh/id_ed25519.pub --title "MacBook Touch ID"
 gh config set git_protocol ssh --host github.com
 ```
 
-## Step 11: Test
+## Step 12: Test
 
 ```bash
 ssh -T git@github.com
@@ -143,7 +150,7 @@ Expected: Touch ID prompt appears. After fingerprint, output:
 Hi <username>! You've successfully authenticated, but GitHub does not provide shell access.
 ```
 
-## Step 12: Update existing cloned repos to SSH
+## Step 13: Update existing cloned repos to SSH
 
 For any repos previously cloned via HTTPS:
 ```bash
@@ -152,19 +159,11 @@ git -C <repo-path> remote set-url origin git@github.com:<owner>/<repo>.git
 
 ## Verification checklist
 
-- [ ] `ssh-add -l` shows the key with "(confirm)" annotation
-- [ ] `git fetch` on any GitHub repo triggers Touch ID
-- [ ] Cancelling Touch ID causes the operation to fail (agent refused)
+- [ ] `ssh-add -l` returns "The agent has no identities"
+- [ ] `ssh -T git@github.com` triggers Touch ID prompt
+- [ ] Cancelling Touch ID causes the operation to fail
 - [ ] `otool -L ~/.ssh/touchid-askpass` shows only Apple system libraries
 - [ ] `gh config get git_protocol -h github.com` returns `ssh`
-
-## After reboot
-
-The key must be re-added to the agent:
-```bash
-ssh-add -c --apple-use-keychain ~/.ssh/id_ed25519
-```
-This can be added to `~/.zshrc` to automate it. The passphrase is pulled from Keychain — no typing required. Touch ID is still required for each SSH operation.
 
 ## Architecture
 
@@ -172,7 +171,7 @@ This can be added to `~/.zshrc` to automate it. The passphrase is pulled from Ke
 git push / ssh
     |
     v
-ssh-agent (key loaded with -c flag)
+SSH client needs passphrase (key not in agent)
     |
     v
 SSH_ASKPASS → ~/.ssh/touchid-askpass (compiled Swift binary)
@@ -180,12 +179,14 @@ SSH_ASKPASS → ~/.ssh/touchid-askpass (compiled Swift binary)
     v
 LocalAuthentication.framework → Touch ID prompt
     |
+    v (on success)
+Security.framework → retrieve passphrase from Keychain
+    |
     v
-success → sign operation approved
-failure → agent refuses, SSH operation denied
+passphrase returned to SSH → connection proceeds
 ```
 
 ## Files
 
 - `touchid-askpass.swift` — source for the Touch ID askpass binary
-- No third-party dependencies. Only Apple's LocalAuthentication framework.
+- No third-party dependencies. Only Apple's LocalAuthentication and Security frameworks.
